@@ -1,5 +1,5 @@
 {application, mem_mq,
- [{description, "An OTP application"},
+ [{description, "An Memory Queue"},
   {vsn, "0.1.0"},
   {registered, []},
   {mod, {mem_mq_app, []}},
@@ -10,6 +10,6 @@
   {env,[]},
   {modules, []},
 
-  {licenses, ["Apache 2.0"]},
+  {licenses, ["MIT"]},
   {links, []}
  ]}.
