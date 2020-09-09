@@ -24,7 +24,11 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0]).
+-export([
+    start_link/1,
+    subscribe/4,
+    test_handle/1
+]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -32,17 +36,28 @@
 
 -define(SERVER, ?MODULE).
 
--record(memmq_subscriber_state, {}).
+-record(state, {
+    name
+}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
 %% @doc Spawns the server and registers the local name (unique)
--spec(start_link() ->
+-spec(start_link(atom()) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
-start_link() ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+start_link(Name) ->
+    gen_server:start_link({local, Name}, ?MODULE, [Name], []).
+
+%% @doc Subscribe a channel
+-spec subscribe(atom(), atom(), atom(), atom()) -> ok.
+subscribe(Subscriber, Channel, HandleMod, HandleFun) ->
+    gen_server:cast(Subscriber, {subscribe, Channel, HandleMod, HandleFun}).
+
+%% @doc Test handler
+test_handle(#{<<"name">> := Name}) ->
+    io:format("hello, ~p~n", [Name]).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -51,40 +66,43 @@ start_link() ->
 %% @private
 %% @doc Initializes the server
 -spec(init(Args :: term()) ->
-    {ok, State :: #memmq_subscriber_state{}} | {ok, State :: #memmq_subscriber_state{}, timeout() | hibernate} |
+    {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
-init([]) ->
-    {ok, #memmq_subscriber_state{}}.
+init([Name]) ->
+    {ok, #state{name = Name}}.
 
 %% @private
 %% @doc Handling call messages
 -spec(handle_call(Request :: term(), From :: {pid(), Tag :: term()},
-                  State :: #memmq_subscriber_state{}) ->
-                     {reply, Reply :: term(), NewState :: #memmq_subscriber_state{}} |
-                     {reply, Reply :: term(), NewState :: #memmq_subscriber_state{}, timeout() | hibernate} |
-                     {noreply, NewState :: #memmq_subscriber_state{}} |
-                     {noreply, NewState :: #memmq_subscriber_state{}, timeout() | hibernate} |
-                     {stop, Reason :: term(), Reply :: term(), NewState :: #memmq_subscriber_state{}} |
-                     {stop, Reason :: term(), NewState :: #memmq_subscriber_state{}}).
-handle_call(_Request, _From, State = #memmq_subscriber_state{}) ->
+                  State :: #state{}) ->
+                     {reply, Reply :: term(), NewState :: #state{}} |
+                     {reply, Reply :: term(), NewState :: #state{}, timeout() | hibernate} |
+                     {noreply, NewState :: #state{}} |
+                     {noreply, NewState :: #state{}, timeout() | hibernate} |
+                     {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
+                     {stop, Reason :: term(), NewState :: #state{}}).
+handle_call(_Request, _From, State = #state{}) ->
     {reply, ok, State}.
 
 %% @private
 %% @doc Handling cast messages
--spec(handle_cast(Request :: term(), State :: #memmq_subscriber_state{}) ->
-    {noreply, NewState :: #memmq_subscriber_state{}} |
-    {noreply, NewState :: #memmq_subscriber_state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: #memmq_subscriber_state{}}).
-handle_cast(_Request, State = #memmq_subscriber_state{}) ->
+-spec(handle_cast(Request :: term(), State :: #state{}) ->
+    {noreply, NewState :: #state{}} |
+    {noreply, NewState :: #state{}, timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: #state{}}).
+handle_cast(_Request, State = #state{}) ->
     {noreply, State}.
 
 %% @private
 %% @doc Handling all non call/cast messages
--spec(handle_info(Info :: timeout() | term(), State :: #memmq_subscriber_state{}) ->
-    {noreply, NewState :: #memmq_subscriber_state{}} |
-    {noreply, NewState :: #memmq_subscriber_state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: #memmq_subscriber_state{}}).
-handle_info(_Info, State = #memmq_subscriber_state{}) ->
+-spec(handle_info(Info :: timeout() | term(), State :: #state{}) ->
+    {noreply, NewState :: #state{}} |
+    {noreply, NewState :: #state{}, timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: #state{}}).
+handle_info({receive_msg, FromChannel, Msg}, State = #state{name = Name}) ->
+    receive_msg(Name, FromChannel, Msg),
+    {noreply, State};
+handle_info(_Info, State = #state{}) ->
     {noreply, State}.
 
 %% @private
@@ -93,18 +111,31 @@ handle_info(_Info, State = #memmq_subscriber_state{}) ->
 %% necessary cleaning up. When it returns, the gen_server terminates
 %% with Reason. The return value is ignored.
 -spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
-                State :: #memmq_subscriber_state{}) -> term()).
-terminate(_Reason, _State = #memmq_subscriber_state{}) ->
+                State :: #state{}) -> term()).
+terminate(_Reason, _State = #state{}) ->
     ok.
 
 %% @private
 %% @doc Convert process state when code is changed
--spec(code_change(OldVsn :: term() | {down, term()}, State :: #memmq_subscriber_state{},
+-spec(code_change(OldVsn :: term() | {down, term()}, State :: #state{},
                   Extra :: term()) ->
-                     {ok, NewState :: #memmq_subscriber_state{}} | {error, Reason :: term()}).
-code_change(_OldVsn, State = #memmq_subscriber_state{}, _Extra) ->
+                     {ok, NewState :: #state{}} | {error, Reason :: term()}).
+code_change(_OldVsn, State = #state{}, _Extra) ->
     {ok, State}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+%% @doc handle message that subscribed
+receive_msg(Name, FromChannel, Msg) ->
+    All = memmq_subscriber_mgr:get_subscribed(Name),
+    receive_msg1(All, FromChannel, Msg).
+
+receive_msg1([{FromChannel, Mod, Fun} | _T], FromChannel, Msg) ->
+    erlang:apply(Mod, Fun, [Msg]),
+    ok;
+receive_msg1([_H | T], FromChannel, Msg) ->
+    receive_msg1(T, FromChannel, Msg);
+receive_msg1([], _FromChannel, _Msg) ->
+    ok.

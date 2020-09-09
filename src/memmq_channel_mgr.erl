@@ -24,13 +24,22 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0]).
+-export([
+    start_link/0,
+    new_channel/1,
+    get_subscriber/1, add_subscriber/2
+]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
 
 -define(SERVER, ?MODULE).
+-define(CHANNEL, channel).
+-record(channel, {
+    name :: atom(),
+    subscribers = [] :: [pid()]
+}).
 
 -record(state, {}).
 
@@ -44,6 +53,26 @@
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
+%% @doc New channel if doesn't exist
+-spec new_channel(atom()) -> {ok, Pid :: pid()}.
+new_channel(Channel) ->
+    gen_server:call(?SERVER, {new_channel, Channel}).
+
+%% @doc Get subscribers by name
+-spec get_subscriber(atom()) -> list().
+get_subscriber(Channel) ->
+    case ets:lookup(?CHANNEL, Channel) of
+        [] ->
+            [];
+        [#channel{subscribers = List}] ->
+            List
+    end.
+
+%% @doc Add a subscriber
+-spec add_subscriber(atom(), atom()) -> ok.
+add_subscriber(Channel, Subscriber) ->
+    gen_server:cast(?SERVER, {add_subscriber, Channel, Subscriber}).
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -54,6 +83,7 @@ start_link() ->
     {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
 init([]) ->
+    ets:new(?CHANNEL, [protected, set, named_table, {keypos, 2}]),
     {ok, #state{}}.
 
 %% @private
@@ -66,6 +96,10 @@ init([]) ->
                      {noreply, NewState :: #state{}, timeout() | hibernate} |
                      {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
                      {stop, Reason :: term(), NewState :: #state{}}).
+handle_call({new_channel, Channel}, _From, State) ->
+    Reply = do_new_channel(Channel),
+    {reply, Reply, State};
+
 handle_call(_Request, _From, State = #state{}) ->
     {reply, ok, State}.
 
@@ -75,6 +109,17 @@ handle_call(_Request, _From, State = #state{}) ->
     {noreply, NewState :: #state{}} |
     {noreply, NewState :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: #state{}}).
+handle_cast({add_subscriber, Channel, Subscriber}, State) ->
+    case ets:lookup(?CHANNEL, Channel) of
+        [] ->
+            ignore;
+        [#channel{subscribers = List} = R] ->
+            List1 = lists:usort([Subscriber | List]),
+            ets:insert(?CHANNEL, R#channel{subscribers = List1}),
+            ok
+    end,
+    {noreply, State};
+
 handle_cast(_Request, State = #state{}) ->
     {noreply, State}.
 
@@ -108,3 +153,17 @@ code_change(_OldVsn, State = #state{}, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+do_new_channel(Channel) ->
+    case ets:lookup(?CHANNEL, Channel) of
+        [] ->
+            case memmq_channel_sup:start_child([Channel]) of
+                {ok, _Pid} ->
+                    ets:insert(?CHANNEL, #channel{name = Channel}),
+                    ok;
+                {error, Reason} ->
+                    {error, Reason}
+            end;
+        [#channel{}] ->
+            ok
+    end.

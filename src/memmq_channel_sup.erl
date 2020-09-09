@@ -24,7 +24,10 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/0]).
+-export([
+    start_link/0,
+    start_child/1
+]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -39,6 +42,11 @@
 -spec(start_link() -> {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+
+%% @doc Start a channel
+-spec start_child(list()) -> supervisor:startchild_ret().
+start_child(Args) ->
+    supervisor:start_child(?MODULE, Args).
 
 %%%===================================================================
 %%% Supervisor callbacks
@@ -55,20 +63,18 @@ start_link() ->
           [ChildSpec :: supervisor:child_spec()]}}
     | ignore | {error, Reason :: term()}).
 init([]) ->
-    MaxRestarts = 1000,
-    MaxSecondsBetweenRestarts = 3600,
-    SupFlags = #{strategy => one_for_one,
-                 intensity => MaxRestarts,
-                 period => MaxSecondsBetweenRestarts},
-    
-    AChild = #{id => 'AName',
-               start => {'AModule', start_link, []},
-               restart => permanent,
+    AChild = #{id => 'memmq_channel',
+               start => {'memmq_channel', start_link, []},
+               restart => transient,
                shutdown => 2000,
                type => worker,
-               modules => ['AModule']},
+               modules => ['memmq_channel']},
     
-    {ok, {SupFlags, [AChild]}}.
+    {ok, {#{strategy => simple_one_for_one,
+            intensity => 0,
+            period => 1},
+          [AChild]}
+    }.
 
 %%%===================================================================
 %%% Internal functions

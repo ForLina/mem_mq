@@ -24,7 +24,10 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0]).
+-export([
+    start_link/1,
+    pub/2
+]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -32,17 +35,26 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {}).
+-record(state, {
+    name,
+    subscribers = []
+}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
 %% @doc Spawns the server and registers the local name (unique)
--spec(start_link() ->
+-spec(start_link(atom()) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
-start_link() ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+start_link(Channel) ->
+    gen_server:start_link({local, Channel}, ?MODULE, [Channel], []).
+
+%% @doc Publish message to a channel
+-spec pub(Channel :: atom(), Msg :: any()) ->
+    ok | {error, Reason :: term()}.
+pub(Channel, Msg) ->
+    gen_server:cast(Channel, {pub, Msg}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -53,8 +65,8 @@ start_link() ->
 -spec(init(Args :: term()) ->
     {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
-init([]) ->
-    {ok, #state{}}.
+init([Channel]) ->
+    {ok, #state{name = Channel}}.
 
 %% @private
 %% @doc Handling call messages
@@ -75,6 +87,9 @@ handle_call(_Request, _From, State = #state{}) ->
     {noreply, NewState :: #state{}} |
     {noreply, NewState :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: #state{}}).
+handle_cast({pub, Msg}, State) ->
+    deliver(Msg, State),
+    {noreply, State};
 handle_cast(_Request, State = #state{}) ->
     {noreply, State}.
 
@@ -108,3 +123,15 @@ code_change(_OldVsn, State = #state{}, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+deliver(Msg, #state{name = Name}) ->
+    List = memmq_channel_mgr:get_subscriber(Name),
+    Fun = fun(Subscriber) ->
+        case whereis(Subscriber) of
+            Pid when is_pid(Pid) ->
+                Pid ! {receive_msg, Name, Msg};
+            _Other ->
+                ignore
+        end
+          end,
+    lists:foreach(Fun, List).

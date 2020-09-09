@@ -29,7 +29,34 @@ init([]) ->
     SupFlags = #{strategy => one_for_all,
                  intensity => 0,
                  period => 1},
-    ChildSpecs = [],
-    {ok, {SupFlags, ChildSpecs}}.
+    Child1 = #{id => 'memmq_channel_mgr',
+               start => {'memmq_channel_mgr', start_link, []},
+               restart => permanent,
+               shutdown => 2000,
+               type => worker,
+               modules => ['memmq_channel_mgr']},
+    
+    Child2 = #{id => 'memmq_channel_sup',
+               start => {'memmq_channel_sup', start_link, []},
+               restart => permanent,
+               shutdown => 2000,
+               type => supervisor,
+               modules => ['memmq_channel_sup']},
+    
+    Child3 = #{id => 'memmq_subscriber_mgr',
+               start => {'memmq_subscriber_mgr', start_link, []},
+               restart => permanent,
+               shutdown => 2000,
+               type => worker,
+               modules => ['memmq_subscriber_mgr']},
+    
+    Child4 = #{id => 'memmq_subscriber_sup',
+               start => {'memmq_subscriber_sup', start_link, []},
+               restart => permanent,
+               shutdown => 2000,
+               type => supervisor,
+               modules => ['memmq_subscriber_sup']},
+    
+    {ok, {SupFlags, [Child1, Child2, Child3, Child4]}}.
 
 %% internal functions

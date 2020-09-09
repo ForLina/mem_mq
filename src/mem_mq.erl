@@ -29,20 +29,20 @@
 ]).
 
 %% @doc New channel if doesn't exist
--spec new_channel(atom()) -> {ok, Pid}.
-new_channel(ChannelName) ->
-    memmq_channel_mgr:new(ChannelName).
+-spec new_channel(atom()) -> {ok, pid()}.
+new_channel(Channel) ->
+    memmq_channel_mgr:new_channel(Channel).
 
 %% @doc Publish message to a channel
--spec pub(ChannelName :: atom(), Msg :: any()) ->
+-spec pub(Channel :: atom(), Msg :: any()) ->
     ok | {error, Reason :: term()}.
-pub(ChannelName, Msg) ->
-    memmq_channel:pub(ChannelName, Msg).
+pub(Channel, Msg) ->
+    memmq_channel:pub(Channel, Msg).
 
 %% @doc Create a subscriber and subscribe specified channel
 -spec sub(Subscriber :: atom(),
           Channel :: atom(),
           HandleMod :: atom(),
-          HandleFun :: atom()) -> {ok, Pid} | {error, Reason :: term()}.
+          HandleFun :: atom()) -> ok | {error, Reason :: term()}.
 sub(Subscriber, Channel, HandleMod, HandleFun) ->
     memmq_subscriber_mgr:sub(Subscriber, Channel, HandleMod, HandleFun).

@@ -25,14 +25,20 @@
 
 %% API
 -export([start_link/0]).
+-export([sub/4, get_subscribed/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
 
 -define(SERVER, ?MODULE).
+-define(SUBSCRIBER, subscriber).
+-record(subscriber, {
+    name,
+    subscribed = []
+}).
 
--record(memmq_subscriber_mgr_state, {}).
+-record(state, {}).
 
 %%%===================================================================
 %%% API
@@ -44,6 +50,22 @@
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
+-spec sub(Subscriber :: atom(),
+          Channel :: atom(),
+          HandleMod :: atom(),
+          HandleFun :: atom()) -> ok | {error, Reason :: term()}.
+sub(Subscriber, Channel, HandleMod, HandleFun) ->
+    gen_server:call(?SERVER, {sub, Subscriber, Channel, HandleMod, HandleFun}).
+
+-spec get_subscribed(atom()) -> list().
+get_subscribed(Subscriber) ->
+    case ets:lookup(?SUBSCRIBER, Subscriber) of
+        [] ->
+            [];
+        [#subscriber{subscribed = List}] ->
+            List
+    end.
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -51,40 +73,44 @@ start_link() ->
 %% @private
 %% @doc Initializes the server
 -spec(init(Args :: term()) ->
-    {ok, State :: #memmq_subscriber_mgr_state{}} | {ok, State :: #memmq_subscriber_mgr_state{}, timeout() | hibernate} |
+    {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
 init([]) ->
-    {ok, #memmq_subscriber_mgr_state{}}.
+    ets:new(?SUBSCRIBER, [protected, set, named_table, {keypos, 2}]),
+    {ok, #state{}}.
 
 %% @private
 %% @doc Handling call messages
 -spec(handle_call(Request :: term(), From :: {pid(), Tag :: term()},
-                  State :: #memmq_subscriber_mgr_state{}) ->
-                     {reply, Reply :: term(), NewState :: #memmq_subscriber_mgr_state{}} |
-                     {reply, Reply :: term(), NewState :: #memmq_subscriber_mgr_state{}, timeout() | hibernate} |
-                     {noreply, NewState :: #memmq_subscriber_mgr_state{}} |
-                     {noreply, NewState :: #memmq_subscriber_mgr_state{}, timeout() | hibernate} |
-                     {stop, Reason :: term(), Reply :: term(), NewState :: #memmq_subscriber_mgr_state{}} |
-                     {stop, Reason :: term(), NewState :: #memmq_subscriber_mgr_state{}}).
-handle_call(_Request, _From, State = #memmq_subscriber_mgr_state{}) ->
+                  State :: #state{}) ->
+                     {reply, Reply :: term(), NewState :: #state{}} |
+                     {reply, Reply :: term(), NewState :: #state{}, timeout() | hibernate} |
+                     {noreply, NewState :: #state{}} |
+                     {noreply, NewState :: #state{}, timeout() | hibernate} |
+                     {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
+                     {stop, Reason :: term(), NewState :: #state{}}).
+handle_call({sub, Subscriber, Channel, HandleMod, HandleFun}, _From, State) ->
+    Reply = do_sub(Subscriber, Channel, HandleMod, HandleFun),
+    {reply, Reply, State};
+handle_call(_Request, _From, State = #state{}) ->
     {reply, ok, State}.
 
 %% @private
 %% @doc Handling cast messages
--spec(handle_cast(Request :: term(), State :: #memmq_subscriber_mgr_state{}) ->
-    {noreply, NewState :: #memmq_subscriber_mgr_state{}} |
-    {noreply, NewState :: #memmq_subscriber_mgr_state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: #memmq_subscriber_mgr_state{}}).
-handle_cast(_Request, State = #memmq_subscriber_mgr_state{}) ->
+-spec(handle_cast(Request :: term(), State :: #state{}) ->
+    {noreply, NewState :: #state{}} |
+    {noreply, NewState :: #state{}, timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: #state{}}).
+handle_cast(_Request, State = #state{}) ->
     {noreply, State}.
 
 %% @private
 %% @doc Handling all non call/cast messages
--spec(handle_info(Info :: timeout() | term(), State :: #memmq_subscriber_mgr_state{}) ->
-    {noreply, NewState :: #memmq_subscriber_mgr_state{}} |
-    {noreply, NewState :: #memmq_subscriber_mgr_state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: #memmq_subscriber_mgr_state{}}).
-handle_info(_Info, State = #memmq_subscriber_mgr_state{}) ->
+-spec(handle_info(Info :: timeout() | term(), State :: #state{}) ->
+    {noreply, NewState :: #state{}} |
+    {noreply, NewState :: #state{}, timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: #state{}}).
+handle_info(_Info, State = #state{}) ->
     {noreply, State}.
 
 %% @private
@@ -93,18 +119,86 @@ handle_info(_Info, State = #memmq_subscriber_mgr_state{}) ->
 %% necessary cleaning up. When it returns, the gen_server terminates
 %% with Reason. The return value is ignored.
 -spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
-                State :: #memmq_subscriber_mgr_state{}) -> term()).
-terminate(_Reason, _State = #memmq_subscriber_mgr_state{}) ->
+                State :: #state{}) -> term()).
+terminate(_Reason, _State = #state{}) ->
     ok.
 
 %% @private
 %% @doc Convert process state when code is changed
--spec(code_change(OldVsn :: term() | {down, term()}, State :: #memmq_subscriber_mgr_state{},
+-spec(code_change(OldVsn :: term() | {down, term()}, State :: #state{},
                   Extra :: term()) ->
-                     {ok, NewState :: #memmq_subscriber_mgr_state{}} | {error, Reason :: term()}).
-code_change(_OldVsn, State = #memmq_subscriber_mgr_state{}, _Extra) ->
+                     {ok, NewState :: #state{}} | {error, Reason :: term()}).
+code_change(_OldVsn, State = #state{}, _Extra) ->
     {ok, State}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+do_sub(Subscriber, Channel, HandleMod, HandleFun) ->
+    CheckItem = [
+                    channel_exist,
+                    function_exported
+                ],
+    
+    Args = #{
+               <<"channel">> => Channel,
+               <<"subscriber">> => Subscriber,
+               <<"handle_mod">> => HandleMod,
+               <<"handle_fun">> => HandleFun
+           },
+    case do_sub_check(CheckItem, Args) of
+        {error, Reason} ->
+            {error, Reason};
+        ok ->
+            do_sub1(Subscriber, Channel, HandleMod, HandleFun)
+    end.
+
+do_sub1(Subscriber, Channel, HandleMod, HandleFun) ->
+    case get_subscriber(Subscriber) of
+        undefined ->
+            case memmq_subscriber_sup:start_child([Subscriber]) of
+                {ok, _Pid} ->
+                    memmq_channel_mgr:add_subscriber(Channel, Subscriber),
+                    ets:insert(?SUBSCRIBER, #subscriber{name = Subscriber, subscribed = [{Channel, HandleMod, HandleFun}]}),
+                    ok;
+                {error, Reason} ->
+                    {error, Reason}
+            end;
+        #subscriber{subscribed = Old} = R ->
+            New =
+                case lists:keyfind(Channel, 1, Old) of
+                    false ->
+                        [{Channel, HandleMod, HandleFun} | Old];
+                    _Tuple ->
+                        lists:keyreplace(Channel, 1, Old, {Channel, HandleMod, HandleFun})
+                end,
+            ets:insert(?SUBSCRIBER, R#subscriber{subscribed = New}),
+            ok
+    end.
+
+do_sub_check([channel_exist | T], #{<<"channel">> := Channel} = Args) ->
+    case whereis(Channel) of
+        undefined ->
+            {error, no_such_channel};
+        _Pid ->
+            do_sub_check(T, Args)
+    end;
+do_sub_check([function_exported], #{
+    <<"handle_mod">> := HandleMod,
+    <<"handle_fun">> := HandleFun}) ->
+    c:l(HandleMod),
+    case erlang:function_exported(HandleMod, HandleFun, 1) of
+        false ->
+            {error, no_handle_function};
+        true ->
+            ok
+    end.
+
+get_subscriber(Subscriber) when is_atom(Subscriber) ->
+    case ets:lookup(?SUBSCRIBER, Subscriber) of
+        [] ->
+            undefined;
+        [#subscriber{} = R] ->
+            R
+    end.
