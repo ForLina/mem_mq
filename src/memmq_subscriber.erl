@@ -133,7 +133,11 @@ receive_msg(Name, FromChannel, Msg) ->
     receive_msg1(All, FromChannel, Msg).
 
 receive_msg1([{FromChannel, Mod, Fun} | _T], FromChannel, Msg) ->
-    erlang:apply(Mod, Fun, [Msg]),
+    try
+        erlang:apply(Mod, Fun, [Msg])
+    catch Class:R:S ->
+        error_logger:error_msg("From Channel: ~p~nMsg:~p~nClass: ~p~nReason:~p~nStacktrace:~p~n", [FromChannel, Msg, Class, R, S])
+    end,
     ok;
 receive_msg1([_H | T], FromChannel, Msg) ->
     receive_msg1(T, FromChannel, Msg);

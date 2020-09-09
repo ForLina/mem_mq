@@ -71,8 +71,8 @@ init([]) ->
                modules => ['memmq_subscriber']},
     
     {ok, {#{strategy => simple_one_for_one,
-            intensity => 0,
-            period => 1},
+            intensity => 10,
+            period => 10},
           [AChild]}
     }.
 
