@@ -25,7 +25,10 @@
 
 %% API
 -export([start_link/0]).
--export([sub/4, get_subscribed/1]).
+-export([
+    sub/4, unsub/2,
+    get_subscribed/1
+]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -56,6 +59,10 @@ start_link() ->
           HandleFun :: atom()) -> ok | {error, Reason :: term()}.
 sub(Subscriber, Channel, HandleMod, HandleFun) ->
     gen_server:call(?SERVER, {sub, Subscriber, Channel, HandleMod, HandleFun}).
+
+-spec unsub(atom(), atom()) -> ok.
+unsub(Subscriber, Channel) ->
+    gen_server:cast(?SERVER, {unsub, Subscriber, Channel}).
 
 -spec get_subscribed(atom()) -> list().
 get_subscribed(Subscriber) ->
@@ -101,6 +108,15 @@ handle_call(_Request, _From, State = #state{}) ->
     {noreply, NewState :: #state{}} |
     {noreply, NewState :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: #state{}}).
+handle_cast({unsub, Subscriber, Channel}, State) ->
+    case ets:lookup(?SUBSCRIBER, Subscriber) of
+        [] ->
+            [];
+        [#subscriber{subscribed = List} = R] ->
+            List1 = lists:keydelete(Channel, 1, List),
+            ets:insert(?SUBSCRIBER, R#subscriber{subscribed = List1})
+    end,
+    {noreply, State};
 handle_cast(_Request, State = #state{}) ->
     {noreply, State}.
 
@@ -160,7 +176,11 @@ do_sub1(Subscriber, Channel, HandleMod, HandleFun) ->
             case memmq_subscriber_sup:start_child([Subscriber]) of
                 {ok, _Pid} ->
                     memmq_channel_mgr:add_subscriber(Channel, Subscriber),
-                    ets:insert(?SUBSCRIBER, #subscriber{name = Subscriber, subscribed = [{Channel, HandleMod, HandleFun}]}),
+                    NewR = #subscriber{
+                        name = Subscriber,
+                        subscribed = [{Channel, HandleMod, HandleFun}]
+                    },
+                    ets:insert(?SUBSCRIBER, NewR),
                     ok;
                 {error, Reason} ->
                     {error, Reason}
@@ -173,6 +193,7 @@ do_sub1(Subscriber, Channel, HandleMod, HandleFun) ->
                     _Tuple ->
                         lists:keyreplace(Channel, 1, Old, {Channel, HandleMod, HandleFun})
                 end,
+            memmq_channel_mgr:add_subscriber(Channel, Subscriber),
             ets:insert(?SUBSCRIBER, R#subscriber{subscribed = New}),
             ok
     end.

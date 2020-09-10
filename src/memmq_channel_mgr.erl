@@ -26,8 +26,8 @@
 %% API
 -export([
     start_link/0,
-    new_channel/1,
-    get_subscriber/1, add_subscriber/2
+    new_channel/1, all_channels/0,
+    get_subscriber/1, add_subscriber/2, unsub/2
 ]).
 
 %% gen_server callbacks
@@ -54,9 +54,15 @@ start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 %% @doc New channel if doesn't exist
--spec new_channel(atom()) -> {ok, Pid :: pid()}.
+-spec new_channel(atom()) -> ok.
 new_channel(Channel) ->
     gen_server:call(?SERVER, {new_channel, Channel}).
+
+%% @doc Get all channel
+-spec all_channels() -> [atom()].
+all_channels() ->
+    All = ets:tab2list(?CHANNEL),
+    [C || #channel{name = C} <- All].
 
 %% @doc Get subscribers by name
 -spec get_subscriber(atom()) -> list().
@@ -72,6 +78,11 @@ get_subscriber(Channel) ->
 -spec add_subscriber(atom(), atom()) -> ok.
 add_subscriber(Channel, Subscriber) ->
     gen_server:cast(?SERVER, {add_subscriber, Channel, Subscriber}).
+
+%% @doc Unsubscribe
+-spec unsub(atom(), atom()) -> ok.
+unsub(Subscriber, Channel) ->
+    gen_server:cast(?SERVER, {unsub, Subscriber, Channel}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -115,6 +126,16 @@ handle_cast({add_subscriber, Channel, Subscriber}, State) ->
             ignore;
         [#channel{subscribers = List} = R] ->
             List1 = lists:usort([Subscriber | List]),
+            ets:insert(?CHANNEL, R#channel{subscribers = List1}),
+            ok
+    end,
+    {noreply, State};
+handle_cast({unsub, Subscriber, Channel}, State) ->
+    case ets:lookup(?CHANNEL, Channel) of
+        [] ->
+            ignore;
+        [#channel{subscribers = List} = R] ->
+            List1 = lists:delete(Subscriber, List),
             ets:insert(?CHANNEL, R#channel{subscribers = List1}),
             ok
     end,

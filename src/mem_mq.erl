@@ -25,11 +25,11 @@
 -export([
     new_channel/1,
     pub/2,
-    sub/4
+    sub/4, unsub/2
 ]).
 
 %% @doc New channel if doesn't exist
--spec new_channel(atom()) -> {ok, pid()}.
+-spec new_channel(atom()) -> ok.
 new_channel(Channel) ->
     memmq_channel_mgr:new_channel(Channel).
 
@@ -46,3 +46,10 @@ pub(Channel, Msg) ->
           HandleFun :: atom()) -> ok | {error, Reason :: term()}.
 sub(Subscriber, Channel, HandleMod, HandleFun) ->
     memmq_subscriber_mgr:sub(Subscriber, Channel, HandleMod, HandleFun).
+
+%% @doc Create a subscriber and subscribe specified channel
+-spec unsub(atom(), atom()) -> ok | {error, Reason :: term()}.
+unsub(Subscriber, Channel) ->
+    memmq_channel_mgr:unsub(Subscriber, Channel),
+    memmq_subscriber_mgr:unsub(Subscriber, Channel).
+    

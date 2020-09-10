@@ -57,11 +57,6 @@ start_child(Args) ->
 %% this function is called by the new process to find out about
 %% restart strategy, maximum restart frequency and child
 %% specifications.
--spec(init(Args :: term()) ->
-    {ok, {SupFlags :: {RestartStrategy :: supervisor:strategy(),
-                       MaxR :: non_neg_integer(), MaxT :: non_neg_integer()},
-          [ChildSpec :: supervisor:child_spec()]}}
-    | ignore | {error, Reason :: term()}).
 init([]) ->
     AChild = #{id => 'memmq_channel',
                start => {'memmq_channel', start_link, []},
